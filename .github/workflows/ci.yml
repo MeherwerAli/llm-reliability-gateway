@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest --cov=llm_gateway --cov-report=term-missing
+      - run: docker build .
+  distributed-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: gateway
+          POSTGRES_USER: gateway
+          POSTGRES_PASSWORD: gateway
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gateway"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports: ["56379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - run: uv run pytest -m integration
+        env:
+          GATEWAY_INTEGRATION_DATABASE_URL: postgresql://gateway:gateway@127.0.0.1:55432/gateway
+          GATEWAY_INTEGRATION_REDIS_URL: redis://127.0.0.1:56379/0
